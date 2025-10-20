@@ -1,0 +1,13 @@
+# Exclude non-app directories from deployment
+reference_ui/
+_doc/
+rules/
+docs/
+steel-match-pro.zip
+API_TEST_RESULTS.md
+API_TEST_SUMMARY.md
+README_API_TESTING.md
+EXPLORIUM_FIXES.md
+EXPLORIUM_API_ISSUE.md
+test-api.sh
+
