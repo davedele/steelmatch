@@ -39,7 +39,6 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "reference_ui/**"
+    "node_modules"
   ]
 }

@@ -1,14 +1,21 @@
+# Build outputs
 .next/
+dist/
+tsconfig.tsbuildinfo
+
+# Dependencies
 node_modules/
-.DS_Store
+
+# Environment files
 .env.local
 .env*
-dist/
 
-
+# Deployment
 .vercel
-_doc/
-agents/
-docs/
-reference_ui/
-rules/
+
+# System files
+.DS_Store
+
+# Project documentation and config
+._doc/
+.cursor/
