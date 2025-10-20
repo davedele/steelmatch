@@ -7,3 +7,8 @@ dist/
 
 
 .vercel
+_doc/
+agents/
+docs/
+reference_ui/
+rules/
