@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "package.json", "use": "@vercel/next" }
+  ],
+  "env": {
+    "EXPLORIUM_API_KEY": "@explorium_api_key",
+    "NEXT_PUBLIC_CALENDLY_URL": "@next_public_calendly_url",
+    "APP_ORIGIN": "@app_origin"
+  }
+}
+
+
