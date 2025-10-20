@@ -72,68 +72,26 @@ class RateLimiter {
 const rateLimiter = new RateLimiter();
 
 /**
- * Build filters object following Explorium's API structure
- * Filters use "values" objects with include/exclude patterns
- * Reference: https://developers.explorium.ai/reference/quick-starts/quick-starts
+ * Build filters object following Explorium's actual API structure
+ * Reference: https://developers.explorium.ai/reference/businesses/fetch_businesses
+ * Format: { "filter_name": { "values": ["value1", "value2"] } }
  */
 function buildFilters(parsed: ParsedRequirements): Record<string, unknown> {
   const filters: Record<string, unknown> = {
-    // Base filters for U.S. manufacturers
-    countries: {
-      values: ['United States'],
-      operator: 'include',
+    // Base filter for U.S. only
+    country_code: {
+      values: ['US'], // Use country code, not full name
     },
-    // NAICS codes for metal manufacturing
-    naics_codes: {
-      values: [
-        '331110', // Iron and Steel Mills
-        '331222', // Steel Wire Drawing
-        '332322', // Sheet Metal Work Manufacturing
-        '332431', // Metal Can Manufacturing
-        '332721', // Precision Turned Product Manufacturing
-      ],
-      operator: 'include',
+    // Filter by company size - focus on established manufacturers
+    // Valid values: '1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001-10000', '10001+'
+    company_size: {
+      values: ['51-200', '201-500', '501-1000', '1001-5000'],
     },
-  };
-
-  // Location filters
-  if (parsed.location?.state) {
-    filters.states = {
-      values: [parsed.location.state],
-      operator: 'include',
-    };
-  }
-  if (parsed.location?.zip) {
-    filters.zip_codes = {
-      values: [parsed.location.zip],
-      operator: 'include',
-    };
-  }
-
-  // Lead time filter (if delivery requirement specified)
-  const targetLeadDays =
-    typeof parsed.delivery?.days === 'number'
-      ? parsed.delivery.days
-      : typeof parsed.delivery?.weeks === 'number'
-        ? parsed.delivery.weeks * 7
-        : null;
-
-  if (targetLeadDays) {
-    filters.lead_time_days_max = targetLeadDays;
-  }
-
-  // Budget filters
-  if (parsed.budget?.min) {
-    filters.project_budget_min = parsed.budget.min;
-  }
-  if (parsed.budget?.max) {
-    filters.project_budget_max = parsed.budget.max;
-  }
-
-  // Employee count (quality filter)
-  filters.employee_count = {
-    values: ['10+'],
-    operator: 'include',
+    // Use google_category for industry filtering
+    // Examples: "manufacturing", "metal fabrication", "machinery", etc.
+    google_category: {
+      values: ['manufacturing', 'metal fabrication', 'machinery'],
+    },
   };
 
   return filters;
@@ -152,7 +110,8 @@ async function getBusinessStats(filters: Record<string, unknown>, apiKey: string
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          'accept': 'application/json',
+          'api_key': apiKey,
         },
         body: JSON.stringify({ filters }),
         cache: 'no-store',
@@ -207,7 +166,8 @@ async function matchBusinesses(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          'accept': 'application/json',
+          'api_key': apiKey,
         },
         body: JSON.stringify(payload),
         cache: 'no-store',
@@ -239,46 +199,25 @@ async function matchBusinesses(
 }
 
 /**
- * Step 3: Fetch business data using matched business_ids
+ * Step 3: Fetch business data using filters
+ * Reference: https://developers.explorium.ai/reference/businesses/fetch_businesses
  */
 async function fetchBusinesses(
   businessIds: string[],
   filters: Record<string, unknown>,
   apiKey: string,
 ): Promise<Ok | Err> {
-  if (!businessIds.length) {
-    return { ok: true, data: [] };
-  }
-
   const baseUrl = process.env.EXPLORIUM_API_URL || 'https://api.explorium.ai/v1';
   const endpoint = `${baseUrl}/businesses`;
 
-  // Request specific signals/attributes
-  const requestedSignals = [
-    'company_name',
-    'hq_location',
-    'website',
-    'domain',
-    'employee_count',
-    'iso_9001_certified',
-    'as9100_certified',
-    'nadcap_certified',
-    'lead_time_days',
-    'avg_lead_time_days',
-    'recycled_content_percent',
-    'sustainability_score',
-    'has_cnc_capability',
-    'cnc_capability',
-    'manufacturing_capabilities',
-    'certifications',
-  ];
-
+  // Build payload according to actual API spec
   const payload = {
-    business_ids: businessIds,
-    filters,
-    signals: requestedSignals,
+    request_context: {},
+    mode: 'preview' as const, // Use 'preview' to get less data and avoid timeout
+    size: 10, // Request only 10 records
+    page_size: 10, // Records per page
     page: 1,
-    page_size: Math.min(businessIds.length, 100), // Max 100 per page
+    filters,
   };
 
   try {
@@ -289,7 +228,8 @@ async function fetchBusinesses(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          'accept': 'application/json',
+          'api_key': apiKey,
         },
         body: JSON.stringify(payload),
         cache: 'no-store',
@@ -297,10 +237,10 @@ async function fetchBusinesses(
     );
 
     const json = await response.json().catch(() => ({}));
-    const correlation_id = json?.correlation_id || response.headers.get('x-correlation-id') || undefined;
+    const correlation_id = json?.response_context?.correlation_id || response.headers.get('x-correlation-id') || undefined;
 
     console.log('[Explorium Fetch] status:', response.status, 'correlation_id:', correlation_id);
-    console.log('[Explorium Fetch] response:', json);
+    console.log('[Explorium Fetch] response:', JSON.stringify(json).substring(0, 500));
 
     if (!response.ok) {
       const message = json?.detail || json?.message || 'Fetch endpoint error';
@@ -308,13 +248,8 @@ async function fetchBusinesses(
       return { ok: false, code: 'FETCH_ERROR', message, status: response.status, correlation_id };
     }
 
-    const records = Array.isArray(json?.businesses)
-      ? json.businesses
-      : Array.isArray(json?.data)
-        ? json.data
-        : Array.isArray(json?.results)
-          ? json.results
-          : [];
+    // Extract data from response (actual field is 'data')
+    const records = Array.isArray(json?.data) ? json.data : [];
 
     const normalized = records.map((record: ExploriumRecord) => {
       const signals = record?.signals ?? record?.signal_values ?? {};
@@ -342,10 +277,8 @@ async function fetchBusinesses(
 }
 
 /**
- * Main query function implementing the recommended workflow:
- * 1. Assess market potential (stats)
- * 2. Match businesses (get business_ids)
- * 3. Fetch enriched business data
+ * Main query function using Explorium Fetch Businesses API
+ * Reference: https://developers.explorium.ai/reference/businesses/fetch_businesses
  * 
  * Mock Mode: Set EXPLORIUM_MOCK_MODE=true to use test data
  */
@@ -362,50 +295,20 @@ export async function queryExplorium(parsed: ParsedRequirements, originalQuery: 
     return { ok: false, code: 'NO_API_KEY', message: 'Explorium API key missing', status: 500 };
   }
 
-  // Build filters once
+  // Build filters based on requirements
   const filters = buildFilters(parsed);
 
-  console.log('[Explorium] Starting workflow with filters:', JSON.stringify(filters, null, 2));
+  console.log('[Explorium] Fetching businesses with filters:', JSON.stringify(filters, null, 2));
 
-  // Step 1: Assess market potential
-  const stats = await getBusinessStats(filters, apiKey);
-  if ('ok' in stats && !stats.ok) {
-    // If stats fails, continue anyway (non-critical)
-    console.warn('[Explorium] Stats check failed, continuing:', stats.message);
-  } else {
-    console.log('[Explorium] Market size:', (stats as StatsResponse).total_count, 'businesses');
-  }
-
-  // Step 2: Match businesses
-  const matchResult = await matchBusinesses(originalQuery, filters, apiKey);
-  if (!matchResult.ok) {
-    return matchResult;
-  }
-
-  const { matches, correlation_id: match_correlation_id } = matchResult;
-  console.log('[Explorium] Matched:', matches.length, 'businesses', 'correlation_id:', match_correlation_id);
-
-  if (!matches.length) {
-    return {
-      ok: true,
-      data: [],
-      ...(match_correlation_id ? { correlation_id: match_correlation_id } : {}),
-    };
-  }
-
-  // Extract top 5 business_ids by confidence
-  const businessIds = matches
-    .sort((a, b) => (b.confidence_score ?? 0) - (a.confidence_score ?? 0))
-    .slice(0, 5)
-    .map((m) => m.business_id);
-
-  // Step 3: Fetch enriched business data
-  const fetchResult = await fetchBusinesses(businessIds, filters, apiKey);
+  // Fetch businesses directly using filters
+  // We search by criteria (location, industry, size) rather than matching specific companies
+  const fetchResult = await fetchBusinesses([], filters, apiKey);
+  
   if (!fetchResult.ok) {
     return fetchResult;
   }
 
-  console.log('[Explorium] Fetched:', fetchResult.data.length, 'enriched businesses');
+  console.log('[Explorium] Fetched:', fetchResult.data.length, 'businesses');
 
   return fetchResult;
 }
